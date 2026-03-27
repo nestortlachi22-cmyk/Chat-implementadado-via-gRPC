@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package mensajeria;
+
+service Mensajeria {
+  // RPC: Suscribirse (Long Polling o Unary call que bloquea hasta tener mensaje)
+  rpc Poll (Suscripcion) returns (Mensaje);
+
+  // Enviar a todos los usuarios activos (Difusión Global)
+  rpc EnviarBroadcast (MensajeGlobal) returns (Respuesta);
+
+  // Enviar a una sala específica
+  rpc EnviarMulticast (MensajeEnvio) returns (Respuesta);
+
+  // Enviar al primer cliente de una sala
+  rpc EnviarAnycast (MensajeEnvio) returns (Respuesta);
+
+  // Listar activos
+  rpc ListarUsuarios (Vacio) returns (Lista);
+  rpc ListarSalas (Vacio) returns (Lista);
+}
+
+message Lista {
+  repeated string items = 1;
+}
+
+message Vacio {}
+
+message Suscripcion {
+  string sala = 1;
+  string tipo_sala = 2; // "unicast" o "multicast"
+}
+
+message MensajeEnvio {
+  string sala = 1;
+  string contenido = 2; // O usar un string JSON para ser flexible
+}
+
+message MensajeGlobal {
+  string contenido = 1; // Contenido en JSON (usuario, texto, id)
+}
+
+message Mensaje {
+  string tipo = 1;
+  string sala = 2;
+  string contenido = 3;
+}
+
+message Respuesta {
+  string status = 1;
+  string error = 2;
+}
