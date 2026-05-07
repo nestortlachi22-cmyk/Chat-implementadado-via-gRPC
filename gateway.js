@@ -2,6 +2,7 @@ const express = require('express');
 const grpc = require('@grpc/grpc-js');
 const protoLoader = require('@grpc/proto-loader');
 const path = require('path');
+const os = require('os');
 
 // ==========================================
 // 1. CONFIGURACIÓN DEL CLIENTE gRPC
@@ -15,6 +16,29 @@ const mensajeriaProto = grpc.loadPackageDefinition(packageDefinition).mensajeria
 // Nos conectamos al Backend gRPC (server.js)
 const GRPC_SERVER = process.env.GRPC_SERVER || '127.0.0.1:50051';
 const client = new mensajeriaProto.Mensajeria(GRPC_SERVER, grpc.credentials.createInsecure());
+
+function obtenerIPv4Local() {
+    const interfaces = os.networkInterfaces();
+    const direcciones = [];
+
+    Object.values(interfaces).forEach((items) => {
+        items.forEach((item) => {
+            if (item.family === 'IPv4' && !item.internal) {
+                direcciones.push(item.address);
+            }
+        });
+    });
+
+    return direcciones.find(ip => ip.startsWith('192.168.'))
+        || direcciones.find(ip => ip.startsWith('10.'))
+        || direcciones.find(ip => /^172\.(1[6-9]|2\d|3[0-1])\./.test(ip))
+        || direcciones[0]
+        || '127.0.0.1';
+}
+
+function obtenerPuertoGrpc(grpcServer) {
+    return grpcServer.split(':').pop() || '50051';
+}
 
 // ==========================================
 // 2. CONFIGURACIÓN DEL API GATEWAY (HTTP)
@@ -111,7 +135,11 @@ app.get('/listado/salas', (req, res) => {
 
 const PORT = 3000;
 app.listen(PORT, '0.0.0.0', () => {
+    const ipLocal = obtenerIPv4Local();
+    const puertoGrpc = obtenerPuertoGrpc(GRPC_SERVER);
+    const urlRedLocal = `http://${ipLocal}:${PORT}`;
+
     console.log(`🚀 API Gateway Iniciado en el puerto ${PORT}`);
-    console.log(`🌐 Abierto a Navegadores (Frontend HTML) en el puerto ${PORT}`);
-    console.log(`🔗 Usando el Backend gRPC en ${GRPC_SERVER}`);
+    console.log(`🌐 Abierto a Navegadores (Frontend HTML): ${urlRedLocal}`);
+    console.log(`🔗 Usando el Backend gRPC en ${GRPC_SERVER} | IP local: ${ipLocal}:${puertoGrpc}`);
 });
