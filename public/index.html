@@ -1254,7 +1254,7 @@
 
             if (chatSeleccionado === chatId) {
                 chatScroller.scrollTop = chatScroller.scrollHeight;
-            } else {
+            } else if (!esMio) {
                 if (chats[chatId]) {
                     chats[chatId].unread++;
                     const badge = document.getElementById(`badge-${chatId}`);
