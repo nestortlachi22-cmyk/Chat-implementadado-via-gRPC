@@ -28,8 +28,18 @@ Para ejecutar este proyecto, necesitas tener instalado **Node.js (versión 16 o 
     npm -v
     ```
 
-### 2. Clonar e Instalar Dependencias
-Una vez tengas Node.js, sigue estos pasos:
+### 2. Instalar Git
+Necesitarás Git para clonar el repositorio de forma sencilla.
+
+*   **Descarga Oficial:** [https://git-scm.com/downloads](https://git-scm.com/downloads)
+*   **Verificar instalación:**
+    ```bash
+    git --version
+    ```
+
+### 3. Clonar e Instalar Dependencias
+Una vez tengas Node.js y Git, sigue estos pasos:
+
 
 ```bash
 # Clonar el repositorio (o descargar los archivos)
