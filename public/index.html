@@ -256,6 +256,7 @@
             cursor: pointer;
             transition: background 0.2s;
             margin-bottom: 4px;
+            position: relative;
         }
 
         .chat-item:hover {
@@ -330,6 +331,70 @@
             justify-content: center;
             align-items: center;
             margin-left: 8px;
+        }
+
+        .chat-menu-toggle {
+            position: absolute;
+            right: 8px;
+            bottom: 6px;
+            width: 24px;
+            height: 24px;
+            border: 1px solid var(--border-color);
+            border-radius: 50%;
+            background: var(--surface-color);
+            color: var(--text-muted);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: var(--shadow-sm);
+            font-size: 12px;
+            line-height: 1;
+            z-index: 4;
+        }
+
+        .chat-item:hover .chat-menu-toggle,
+        .chat-menu-toggle.open {
+            display: flex;
+        }
+
+        .chat-menu-toggle:hover {
+            color: var(--text-main);
+            border-color: var(--text-muted);
+        }
+
+        .chat-dropdown {
+            position: absolute;
+            right: 8px;
+            bottom: 34px;
+            min-width: 136px;
+            background: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            box-shadow: var(--shadow-lg);
+            padding: 6px;
+            z-index: 20;
+        }
+
+        .chat-dropdown button {
+            width: 100%;
+            border: none;
+            background: transparent;
+            border-radius: 6px;
+            padding: 9px 10px;
+            text-align: left;
+            font-family: inherit;
+            font-size: 13px;
+            color: var(--text-main);
+            cursor: pointer;
+        }
+
+        .chat-dropdown button:hover {
+            background: var(--bg-color);
+        }
+
+        .chat-dropdown .danger {
+            color: #dc2626;
         }
 
         /* --- Panel de Chat --- */
@@ -809,6 +874,18 @@
 
 
 
+    <div class="modal-overlay" id="modal-borrar-chat">
+        <div class="modal">
+            <h3>Borrar chat</h3>
+            <p>Se eliminara este chat y su historial local. Esta accion no borra mensajes en otros usuarios.</p>
+            <p id="nombre-chat-borrar" style="font-weight:600; color:var(--text-main); margin-top:-12px;"></p>
+            <div class="modal-buttons">
+                <button class="btn-cancel" onclick="cerrarModales()">Cancelar</button>
+                <button class="btn-ok" onclick="confirmarBorrarChat()" style="background:#dc2626;">Borrar</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         // Funciones de Notificación
         let audioCtx;
@@ -849,6 +926,8 @@
         // ESTADO GLOBAL
         let usuarioActual = "";
         let chatSeleccionado = "";
+        let chatMenuAbierto = "";
+        let chatPendienteBorrar = "";
         let mensajesVistos = new Set();
         let salasEscuchando = new Set();
 
@@ -1027,9 +1106,12 @@
             document.getElementById('modal-grupo').style.display = 'none';
             document.getElementById('modal-botella').style.display = 'none';
             document.getElementById('modal-broadcast').style.display = 'none';
+            document.getElementById('modal-borrar-chat').style.display = 'none';
             document.getElementById('input-grupo-nuevo').value = '';
             document.getElementById('input-botella-texto').value = '';
             document.getElementById('input-broadcast').value = '';
+            chatPendienteBorrar = '';
+            cerrarMenuChat();
         }
 
         function agregarContactoSimple(nombre) {
@@ -1122,7 +1204,7 @@
         }
 
         function crearChat(id, type, title, icon, bg, target) {
-            chats[id] = { id, type, title, icon, bg, target, unread: 0 };
+            chats[id] = { id, type, title, icon, bg, target, unread: 0, lastMsg: 'Listo para conversar' };
 
             const historyDiv = document.createElement('div');
             historyDiv.id = 'history-' + id;
@@ -1162,20 +1244,95 @@
                 item.onclick = () => seleccionarChat(chat.id);
 
                 let typeText = chat.type === 'unicast' ? 'Unicast' : chat.type === 'multicast' ? 'Multicast' : chat.type === 'broadcast' ? 'Todos' : 'Anycast';
+                const menuAbierto = chatMenuAbierto === chat.id;
 
                 item.innerHTML = `
                     <div class="chat-icon" style="background: ${chat.bg};">${chat.icon}</div>
                     <div class="chat-info">
                         <div class="chat-title">${chat.title} <span class="chat-type-badge">${typeText}</span></div>
-                        <div class="chat-last-msg" id="last-${chat.id}">Listo para conversar</div>
+                        <div class="chat-last-msg" id="last-${chat.id}">${chat.lastMsg || 'Listo para conversar'}</div>
                     </div>
                     <div class="unread-badge" id="badge-${chat.id}" style="${chat.unread > 0 ? 'display:flex' : 'display:none'}">${chat.unread}</div>
+                    <button class="chat-menu-toggle ${menuAbierto ? 'open' : ''}" title="Opciones del chat" aria-label="Opciones del chat">&#9662;</button>
+                    ${menuAbierto ? `
+                        <div class="chat-dropdown">
+                            <button class="danger" type="button">Borrar chat</button>
+                        </div>
+                    ` : ''}
                 `;
+
+                const menuToggle = item.querySelector('.chat-menu-toggle');
+                menuToggle.onclick = (event) => alternarMenuChat(event, chat.id);
+
+                const borrarButton = item.querySelector('.chat-dropdown .danger');
+                if (borrarButton) {
+                    borrarButton.onclick = (event) => abrirModalBorrarChat(event, chat.id);
+                }
+
                 chatListDOM.appendChild(item);
             });
         }
 
+        function alternarMenuChat(event, chatId) {
+            event.stopPropagation();
+            chatMenuAbierto = chatMenuAbierto === chatId ? '' : chatId;
+            renderizarListaChats();
+        }
+
+        function cerrarMenuChat() {
+            if (!chatMenuAbierto) return;
+            chatMenuAbierto = '';
+            document.querySelectorAll('.chat-dropdown').forEach(el => el.remove());
+            document.querySelectorAll('.chat-menu-toggle.open').forEach(el => el.classList.remove('open'));
+        }
+
+        function abrirModalBorrarChat(event, chatId) {
+            event.stopPropagation();
+            const chat = chats[chatId];
+            if (!chat) return;
+
+            chatPendienteBorrar = chatId;
+            chatMenuAbierto = '';
+            document.getElementById('nombre-chat-borrar').innerText = chat.title;
+            document.getElementById('modal-borrar-chat').style.display = 'flex';
+            renderizarListaChats();
+        }
+
+        function mostrarEstadoVacio() {
+            chatSeleccionado = '';
+            document.getElementById('empty-state').style.display = 'flex';
+            document.getElementById('chat-header').style.display = 'none';
+            document.getElementById('chat-scroller').style.display = 'none';
+            document.getElementById('chat-input-area').style.display = 'none';
+            document.getElementById('whatsapp-container').classList.remove('mobile-chat-active');
+            document.querySelectorAll('.history-container').forEach(el => el.classList.remove('active-history'));
+            document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
+        }
+
+        function confirmarBorrarChat() {
+            const chatId = chatPendienteBorrar;
+            if (!chatId || !chats[chatId]) {
+                cerrarModales();
+                return;
+            }
+
+            const estabaSeleccionado = chatSeleccionado === chatId;
+            const history = document.getElementById(`history-${chatId}`);
+            if (history) history.remove();
+
+            delete chats[chatId];
+            chatPendienteBorrar = '';
+            chatMenuAbierto = '';
+            document.getElementById('modal-borrar-chat').style.display = 'none';
+
+            renderizarListaChats();
+            if (estabaSeleccionado) {
+                mostrarEstadoVacio();
+            }
+        }
+
         function seleccionarChat(chatId) {
+            cerrarMenuChat();
             chatSeleccionado = chatId;
             if (chats[chatId]) chats[chatId].unread = 0;
 
@@ -1233,7 +1390,9 @@
             container.appendChild(div);
 
             const lastMsgEl = document.getElementById(`last-${chatId}`);
-            if (lastMsgEl) lastMsgEl.innerText = `${esMio ? 'Tú' : usuario}: ${texto}`;
+            const lastMsg = `${esMio ? 'Tú' : usuario}: ${texto}`;
+            if (chats[chatId]) chats[chatId].lastMsg = lastMsg;
+            if (lastMsgEl) lastMsgEl.innerText = lastMsg;
 
             if (!esMio) {
                 reproducirSonido();
@@ -1319,6 +1478,8 @@
         document.getElementById('input-mensaje').addEventListener('keypress', function (e) {
             if (e.key === 'Enter') enviarMensaje();
         });
+
+        document.addEventListener('click', cerrarMenuChat);
 
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') cerrarModales();
