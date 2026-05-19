@@ -4,6 +4,7 @@ const protoLoader = require('@grpc/proto-loader');
 const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
+const qrcode = require('qrcode-terminal');
 
 // ==========================================
 // 1. CONFIGURACIÓN DEL CLIENTE gRPC
@@ -159,6 +160,13 @@ function obtenerPuertoGrpc(grpcServer) {
     return grpcServer.split(':').pop() || '50051';
 }
 
+function imprimirQRConsola(url) {
+    console.log('📱 Escanea este QR para abrir la app desde otro dispositivo:');
+    qrcode.generate(url, { small: true }, (qr) => {
+        console.log(qr);
+    });
+}
+
 // ==========================================
 // 2. CONFIGURACIÓN DEL API GATEWAY (HTTP)
 // ==========================================
@@ -269,5 +277,6 @@ app.listen(PORT, '0.0.0.0', () => {
     }
     console.log(`🚀 API Gateway Iniciado en el puerto ${PORT}`);
     console.log(`🌐 Abierto a Navegadores (Frontend HTML): ${urlRedLocal} (${detalleRedLocal})`);
+    imprimirQRConsola(urlRedLocal);
     console.log(`🔗 Usando el Backend gRPC en ${GRPC_SERVER} | IP local: ${ipLocal}:${puertoGrpc}`);
 });
