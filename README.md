@@ -1,45 +1,118 @@
-Reporte Técnico: Arquitectura de Ruteo de Mensajes con Google RPC (gRPC)
+# 💬 Chat System via gRPC & API Gateway
 
-Este documento detalla la implementación, decisiones arquitectónicas y el funcionamiento a bajo nivel de la práctica de chat conversacional utilizando el estándar Google RPC, cubriendo los niveles del modelo OSI involucrados.
-1. ¿Cómo está funcionando RPC?
+Una implementación robusta de un sistema de mensajería en tiempo real utilizando **gRPC** como protocolo de comunicación principal en el backend y un **API Gateway (Express)** para permitir la interacción con navegadores modernos mediante **HTTP/JSON**.
 
-RPC (Remote Procedure Call) o Llamada a Procedimiento Remoto, es un protocolo de nivel de Sesión/Presentación (Capas 5 y 6 del modelo OSI) que permite a un programa de computadora ejecutar código en otra máquina de forma transparente.
+---
 
-En este proyecto utilizamos la implementación moderna gRPC (desarrollada por Google). A diferencia de las APIs REST tradicionales que usan URLS y verbos (GET, POST), gRPC funciona como si el servidor y el cliente fueran partes del mismo programa.
+## 🚀 Tecnologías Utilizadas
 
-    El Contrato (mensajeria.proto): Se definió un archivo Protobuf estricto que dicta qué funciones existen (ej. EnviarBroadcast) y cómo están tipados los datos.
-    Serialización (Capa 6): Cuando un cliente llama a client.EnviarBroadcast(datos), gRPC no envía un archivo de texto JSON. Comprime los datos en lenguaje binario (Protobuf) haciendo el trasiego de red significativamente más rápido, pequeño y seguro.
-    Transporte Binario: El mensaje viaja usando internamente HTTP/2 puro (sobre TCP).
-    Ejecución (Capa 7): El servidor recibe el binario, lo decodifica a su lenguaje nativo (NodeJS), ejecuta su lógica y retorna la respuesta. Todo esto ocurre en milisegundos en modo síncrono (el cliente espera a la confirmación response.status para seguir).
+El proyecto emplea un stack moderno enfocado en alto rendimiento y comunicación eficiente:
 
-2. ¿Por qué fue necesario el protocolo HTTP ("El Gateway")?
+*   **[Node.js](https://nodejs.org/):** Entorno de ejecución para el servidor y el gateway.
+*   **[gRPC](https://grpc.io/):** Framework RPC de alto rendimiento para la comunicación entre el Backend y el Gateway.
+*   **[Protocol Buffers (Proto3)](https://developers.google.com/protocol-buffers):** Lenguaje de serialización para definir los servicios y mensajes.
+*   **[Express.js](https://expressjs.com/):** Framework web utilizado para construir el API Gateway.
+*   **[HTML5 / CSS3 / JavaScript (Vanilla)](https://developer.mozilla.org/es/):** Interfaz de usuario dinámica y responsiva para el cliente web.
 
-Si el proyecto entero es gRPC, ¿por qué utilizamos HTTP/JSON (Express) en el archivo gateway.js? La respuesta se conoce arquitectónicamente como La restricción del Navegador.
+---
 
-    La Incompatibilidad: Los navegadores web (Chrome, Firefox, Safari) no tienen soporte nativo para enviar directamente tramas binarias crudas de HTTP/2 que exige el estándar gRPC puro. El navegador sabe hacer peticiones fetch() usando HTTP/1.1 que retornan texto (HTML, JS, XML, JSON).
-    La Solución (API Gateway): Fue necesario crear un puente. Tu interfaz visual (index.html) hace peticiones web ordinarias a gateway.js. Entonces, gateway.js actúa como el traductor: lee tu texto en JSON, lo empaqueta en binario Protobuf, y se lo inyecta a tu servidor puro (server.js) a través de un canal exclusivo gRPC.
-    Conclusión: HTTP solo fue necesario para la presentación gráfica de HTML/CSS/JS y la experiencia humana; pero el enrutamiento central y real de las interacciones ocurre enteramente por RPC.
+## 🛠️ Requisitos e Instalación
 
-3. Explicación a fondo: server.js (El Backend o Core)
+### 1. Instalar Node.js
+Para ejecutar este proyecto, necesitas tener instalado **Node.js (versión 16 o superior)**.
 
-server.js es tu motor de capa de red. No sabe qué es un navegador; es un servidor gRPC sordo y ciego a la web estándar. Sus responsabilidades son:
-A. Mantener un Estado Global
+*   **Descarga Oficial:** [https://nodejs.org/es/download/](https://nodejs.org/es/download/)
+*   **Verificar instalación:**
+    ```bash
+    node -v
+    npm -v
+    ```
 
-Utiliza el arreglo en memoria let clientesEsperando = [];. Cada vez que alguien invoca el RPC Poll, el servidor toma ese objeto de conexión abierta (call) y lo guarda allí asociándolo a una "Sala" determinada. De esta forma, el servidor conoce exactamente quiénes están "en línea" y en qué salas.
-B. Enrutamiento en Capa de Aplicación
+### 2. Clonar e Instalar Dependencias
+Una vez tengas Node.js, sigue estos pasos:
 
-El archivo implementa tres algoritmos matriciales para decidir hacia quién fluyen los datos (Capa OSI 7):
+```bash
+# Clonar el repositorio (o descargar los archivos)
+git clone https://github.com/nestortlachi22-cmyk/Chat-implementadado-via-gRPC
+cd Chat-implementadado-via-gRPC
 
-    Broadcast: Selecciona todo el arreglo de clientesEsperando y ejectuta cliente.callback(mensaje) para obligar a todos los "tubos" gRPC conectados a devolver los datos. Al final, vacía la cola porque todos han sido notificados.
-    Multicast: Realiza un filtro (.filter) de la memoria revisando quién pertenece a la propiedad salaDestino. Solo aquellos que coinciden reciben la respuesta, ahorrando ancho de banda al resto.
-    Anycast: A diferencia del multicast que envía a un subgrupo, éste busca con .findIndex al primer nodo disponible que pertenezca a la sala, entrega el paquete, y lo retira de la cola para liberar a ese cliente, dejando intactos a los demás. Se comporta como un asignador de tickets o Call-Center.
+# Instalar las dependencias de Node.js
+npm install
+```
 
-4. Explicación a fondo: cliente.js (Cliente gRPC Auténtico)
+---
 
-Para demostrar que el sistema gRPC funciona de maravilla sin navegadores (sin necesidad de HTTP/Express ni HTML), el archivo cliente.js es un script puro para máquinas.
-A. Simulación del Long-Polling (Client-Side)
+## 📡 Arquitectura y Flujo de Datos
 
-En la función recursiva escucharMensajes(), el script invoca client.Poll(...). Esta llamada unary de gRPC fue diseñada para bloquearse intencionalmente en el servidor hasta que alguien envíe un mensaje. En el momento en que gRPC responde, el cliente imprime el resultado en su terminal y vuelve a llamarse a sí mismo de inmediato para esperar el próximo mensaje. Así emula un flujo reactivo o "stream".
-B. Ejecución Transparente
+El sistema utiliza un patrón de **API Gateway** para puentear la comunicación entre el protocolo HTTP (Navegador) y gRPC (Servidor de Mensajería).
 
-En los bloques setTimeout(..., 2000), observamos cómo el cliente dispara: client.EnviarBroadcast({ sala, contenido }, callback) Para el desarrollador, es como si llamara a la función en su computadora local. Toda la estandarización y encripción la realiza la librería gRPC generada dinámicamente (protoLoader). El servidor lo lee, lo ejecuta por su túnel y devuelve inmediatamente un estado de OK.
+### Diagrama de Flujo
+
+```mermaid
+sequenceDiagram
+    participant Browser as 🌐 Navegador (Web Client)
+    participant Gateway as 🚪 API Gateway (Express)
+    participant Server as ⚙️ gRPC Server (Backend)
+
+    Note over Browser, Server: Proceso de Suscripción (Polling)
+    Browser->>Gateway: GET /poll/:sala
+    Gateway->>Server: gRPC Poll (Suscripción)
+    Note right of Server: Mantiene la conexión abierta<br/>hasta recibir un mensaje
+    
+    Note over Browser, Server: Envío de Mensaje
+    Browser->>Gateway: POST /enviar/:metodo { sala, contenido }
+    Gateway->>Server: gRPC Enviar[Metodo] (Datos)
+    Server-->>Gateway: Respuesta gRPC (Status OK)
+    Gateway-->>Browser: Respuesta HTTP 200 OK
+
+    Note over Server: El Servidor busca clientes esperando
+    Server->>Gateway: Callback gRPC con Mensaje
+    Gateway-->>Browser: JSON Response (Mensaje recibido)
+```
+
+---
+
+## 🏃 Cómo Correr el Proyecto
+
+Para que el chat funcione correctamente, debes iniciar tanto el servidor backend como el gateway en terminales separadas:
+
+### Paso 1: Iniciar el Servidor gRPC (Backend)
+Este servidor gestiona la lógica de mensajería, las colas de espera y el enrutamiento de paquetes.
+```bash
+node server.js
+```
+
+### Paso 2: Iniciar el API Gateway
+Este puente permite que los navegadores web se comuniquen con el servidor gRPC.
+```bash
+node gateway.js
+```
+
+### Paso 3: Abrir la aplicación
+Abre tu navegador y navega a la siguiente dirección:
+👉 [http://localhost:3000](http://localhost:3000)
+
+---
+
+## 📨 Patrones de Mensajería Soportados
+
+El sistema implementa cuatro tipos fundamentales de distribución de mensajes definidos en el archivo `mensajeria.proto`:
+
+1.  **Broadcast (Difusión):** El mensaje llega a **todos** los usuarios conectados globalmente.
+2.  **Multicast:** El mensaje llega a todos los usuarios suscritos a una **sala específica**.
+3.  **Anycast:** El mensaje llega al **primer usuario disponible** en una sala específica (útil para balanceo de carga o atención de tickets).
+4.  **Unicast:** Simulado mediante salas privadas con el nombre de usuario, permitiendo chats **uno a uno**.
+
+---
+
+## 📂 Estructura de Archivos Principal
+
+*   `server.js`: Servidor gRPC central que mantiene el estado de los clientes conectados.
+*   `gateway.js`: Servidor Express que traduce peticiones HTTP a llamadas gRPC.
+*   `mensajeria.proto`: Definición del contrato de servicio y tipos de datos.
+*   `public/`: Contiene el frontend (HTML/CSS/JS) para interactuar con el chat.
+*   `cliente.js`: Cliente gRPC de prueba para ejecutar en terminal.
+
+---
+
+
