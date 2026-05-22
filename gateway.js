@@ -3,6 +3,8 @@ const grpc = require('@grpc/grpc-js');
 const protoLoader = require('@grpc/proto-loader');
 const path = require('path');
 const os = require('os');
+const { execSync } = require('child_process');
+const qrcode = require('qrcode-terminal');
 
 // ==========================================
 // 1. CONFIGURACIÓN DEL CLIENTE gRPC
@@ -17,27 +19,152 @@ const mensajeriaProto = grpc.loadPackageDefinition(packageDefinition).mensajeria
 const GRPC_SERVER = process.env.GRPC_SERVER || '127.0.0.1:50051';
 const client = new mensajeriaProto.Mensajeria(GRPC_SERVER, grpc.credentials.createInsecure());
 
-function obtenerIPv4Local() {
-    const interfaces = os.networkInterfaces();
-    const direcciones = [];
+function esIPv4Privada(ip) {
+    return ip.startsWith('192.168.')
+        || ip.startsWith('10.')
+        || /^172\.(1[6-9]|2\d|3[0-1])\./.test(ip);
+}
 
-    Object.values(interfaces).forEach((items) => {
+function esIPv4LinkLocal(ip) {
+    return ip.startsWith('169.254.');
+}
+
+function esIPv4Valida(ip) {
+    return /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/.test(ip);
+}
+
+function esInterfazVirtual(nombre) {
+    return /(virtual|vethernet|vmware|vbox|virtualbox|docker|wsl|hyper-v|loopback|tunnel|tap|vpn|tailscale|zerotier|hamachi|bluetooth|npcap)/i.test(nombre);
+}
+
+function esMACVirtual(mac = '') {
+    return /^(00:05:69|00:0c:29|00:1c:14|00:50:56|08:00:27|0a:00:27|00:15:5d)/i.test(mac);
+}
+
+function obtenerTipoInterfaz(nombre) {
+    if (/(wi-?fi|wireless|wlan|802\.11|airport)/i.test(nombre)) return 'Wi-Fi';
+    if (/(ethernet|^eth\d*|^enp\d|^ens\d|^eno\d|lan)/i.test(nombre)) return 'Ethernet';
+    return 'Red local';
+}
+
+function ejecutarComandoRed(comando) {
+    try {
+        return execSync(comando, {
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'ignore'],
+            timeout: 1500
+        });
+    } catch (error) {
+        return '';
+    }
+}
+
+function obtenerIPv4RutaWindows() {
+    const salida = ejecutarComandoRed('route print -4 0.0.0.0');
+    const rutas = salida.split(/\r?\n/)
+        .map((linea) => linea.trim().split(/\s+/))
+        .filter((partes) => partes[0] === '0.0.0.0' && partes[1] === '0.0.0.0' && esIPv4Valida(partes[3]))
+        .map((partes) => ({
+            ip: partes[3],
+            metrica: Number.parseInt(partes[4], 10) || Number.MAX_SAFE_INTEGER
+        }));
+
+    rutas.sort((a, b) => a.metrica - b.metrica);
+    return rutas[0]?.ip || null;
+}
+
+function obtenerIPv4RutaLinux() {
+    const salidaRuta = ejecutarComandoRed('ip route get 1.1.1.1');
+    const ipRuta = salidaRuta.match(/\bsrc\s+(\d{1,3}(?:\.\d{1,3}){3})\b/)?.[1];
+    if (ipRuta && esIPv4Valida(ipRuta)) return ipRuta;
+
+    const salidaDefault = ejecutarComandoRed('ip route show default');
+    const ipDefault = salidaDefault.match(/\bsrc\s+(\d{1,3}(?:\.\d{1,3}){3})\b/)?.[1];
+    return ipDefault && esIPv4Valida(ipDefault) ? ipDefault : null;
+}
+
+function obtenerIPv4RutaPrincipal() {
+    if (process.platform === 'win32') return obtenerIPv4RutaWindows();
+    if (process.platform === 'linux') return obtenerIPv4RutaLinux();
+    return null;
+}
+
+function puntuarInterfaz(candidato) {
+    let puntos = 0;
+
+    if (candidato.esRutaPrincipal) puntos += 200;
+    if (candidato.esPrivada) puntos += 100;
+    if (candidato.ip.startsWith('192.168.')) puntos += 20;
+    if (candidato.ip.startsWith('10.')) puntos += 15;
+    if (/^172\./.test(candidato.ip)) puntos += 10;
+
+    if (candidato.tipo === 'Wi-Fi') puntos += 40;
+    else if (candidato.tipo === 'Ethernet') puntos += 35;
+    else puntos += 5;
+
+    if (candidato.esVirtual) puntos -= 100;
+    if (candidato.esMACVirtual) puntos -= 80;
+    if (candidato.esLinkLocal) puntos -= 80;
+
+    return puntos;
+}
+
+function obtenerRedLocal() {
+    const interfaces = os.networkInterfaces();
+    const candidatos = [];
+    const ipRutaPrincipal = obtenerIPv4RutaPrincipal();
+
+    Object.entries(interfaces).forEach(([nombre, items = []]) => {
         items.forEach((item) => {
-            if (item.family === 'IPv4' && !item.internal) {
-                direcciones.push(item.address);
+            if ((item.family === 'IPv4' || item.family === 4) && !item.internal) {
+                const candidato = {
+                    ip: item.address,
+                    nombre,
+                    mac: item.mac,
+                    tipo: obtenerTipoInterfaz(nombre),
+                    esPrivada: esIPv4Privada(item.address),
+                    esLinkLocal: esIPv4LinkLocal(item.address),
+                    esVirtual: esInterfazVirtual(nombre),
+                    esMACVirtual: esMACVirtual(item.mac),
+                    esRutaPrincipal: item.address === ipRutaPrincipal
+                };
+
+                candidato.puntos = puntuarInterfaz(candidato);
+                candidatos.push(candidato);
             }
         });
     });
 
-    return direcciones.find(ip => ip.startsWith('192.168.'))
-        || direcciones.find(ip => ip.startsWith('10.'))
-        || direcciones.find(ip => /^172\.(1[6-9]|2\d|3[0-1])\./.test(ip))
-        || direcciones[0]
-        || '127.0.0.1';
+    candidatos.sort((a, b) => b.puntos - a.puntos);
+
+    return {
+        principal: candidatos[0] || {
+            ip: '127.0.0.1',
+            nombre: 'localhost',
+            mac: '00:00:00:00:00:00',
+            tipo: 'Solo esta PC',
+            esPrivada: false,
+            esLinkLocal: false,
+            esVirtual: false,
+            esMACVirtual: false,
+            esRutaPrincipal: false,
+            puntos: 0
+        },
+        alternativas: candidatos.slice(1)
+            .filter((candidato) => candidato.esPrivada && !candidato.esLinkLocal && !candidato.esVirtual && !candidato.esMACVirtual)
+            .slice(0, 3)
+    };
 }
 
 function obtenerPuertoGrpc(grpcServer) {
     return grpcServer.split(':').pop() || '50051';
+}
+
+function imprimirQRConsola(url) {
+    console.log('📱 Escanea este QR para abrir la app desde otro dispositivo:');
+    qrcode.generate(url, { small: true }, (qr) => {
+        console.log(qr);
+    });
 }
 
 // ==========================================
@@ -135,11 +262,21 @@ app.get('/listado/salas', (req, res) => {
 
 const PORT = 3000;
 app.listen(PORT, '0.0.0.0', () => {
-    const ipLocal = obtenerIPv4Local();
+    const redLocal = obtenerRedLocal();
+    const ipLocal = redLocal.principal.ip;
     const puertoGrpc = obtenerPuertoGrpc(GRPC_SERVER);
     const urlRedLocal = `http://${ipLocal}:${PORT}`;
+    const detalleRedLocal = `${redLocal.principal.tipo}: ${redLocal.principal.nombre}`;
+    const urlsAlternativas = redLocal.alternativas
+        .map((candidato) => `http://${candidato.ip}:${PORT} (${candidato.tipo}: ${candidato.nombre})`)
+        .join(' | ');
 
+    console.log(`📡 Interfaz detectada: ${detalleRedLocal}`);
+    if (urlsAlternativas) {
+        console.log(`🧭 Otras IPs LAN detectadas: ${urlsAlternativas}`);
+    }
     console.log(`🚀 API Gateway Iniciado en el puerto ${PORT}`);
-    console.log(`🌐 Abierto a Navegadores (Frontend HTML): ${urlRedLocal}`);
+    console.log(`🌐 Abierto a Navegadores (Frontend HTML): ${urlRedLocal} (${detalleRedLocal})`);
+    imprimirQRConsola(urlRedLocal);
     console.log(`🔗 Usando el Backend gRPC en ${GRPC_SERVER} | IP local: ${ipLocal}:${puertoGrpc}`);
 });
